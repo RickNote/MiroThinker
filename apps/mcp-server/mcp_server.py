@@ -1,7 +1,9 @@
 import os
 import logging
+import uvicorn
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Context
+from starlette.middleware.cors import CORSMiddleware
 
 from mcp_config import Config
 from llm_client import LLMClient
@@ -121,4 +123,15 @@ async def miro_research(
 
 if __name__ == "__main__":
     logger.info(f"Starting MiroThinker MCP Server on port {config.port}")
-    mcp.run(transport="sse", host="0.0.0.0", port=config.port)
+
+    app = mcp.sse_app()
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    uvicorn.run(app, host="0.0.0.0", port=config.port)
