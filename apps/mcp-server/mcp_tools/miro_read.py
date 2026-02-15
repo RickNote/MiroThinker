@@ -60,14 +60,11 @@ async def do_miro_read(
             info_to_extract=info_to_extract,
         )
     except Exception as e:
-        if "context length" in str(e).lower():
-            content = content[:-40960] + "[...truncated]"
-            extracted = await llm_client.extract_info(
-                content=content,
-                info_to_extract=info_to_extract,
-            )
-        else:
-            raise
+        if ctx:
+            ctx.warning(f"[MiroThinker] ⚠️ LLM 提取失败: {e}，返回原始内容")
+        extracted = content[:6000]
+        if len(content) > 6000:
+            extracted += "\n\n[...内容已截断...]"
 
     if ctx:
         ctx.info(f"[MiroThinker] ✅ 内容提取完成 ({len(content)} 字)")

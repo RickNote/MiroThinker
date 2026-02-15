@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any
+from typing import Any, List, Dict
 
 import httpx
 
@@ -10,13 +10,14 @@ from mcp_tools.utils import decode_http_urls_in_dict, is_huggingface_dataset_or_
 logger = logging.getLogger("mirothinker")
 
 
-async def do_miro_search(
+async def _raw_search(
     config: Config,
     query: str,
     num_results: int = 10,
     search_type: str = "search",
     ctx: Any = None,
-) -> str:
+) -> List[Dict]:
+    """内部函数：执行搜索并返回结构化的原始结果。"""
     if ctx:
         ctx.info(f"[MiroThinker] 🔍 正在搜索: {query}")
 
@@ -36,7 +37,7 @@ async def do_miro_search(
         payload["tbs"] = "qdr:w"
 
     retry_delays = [4, 7, 10]
-    last_exception = None
+    data: Dict[str, Any] = {}
 
     for attempt, delay in enumerate(retry_delays, 1):
         try:
@@ -46,7 +47,6 @@ async def do_miro_search(
                 data = response.json()
                 break
         except (httpx.ConnectError, httpx.Timeout, httpx.HTTPStatusError) as e:
-            last_exception = e
             if attempt < len(retry_delays):
                 await asyncio.sleep(delay)
                 continue
@@ -64,7 +64,20 @@ async def do_miro_search(
         if ctx:
             ctx.info("[MiroThinker] 无结果，尝试去掉引号重新搜索...")
         new_query = query.replace('"', "")
-        return await do_miro_search(config, new_query, num_results, search_type, ctx)
+        return await _raw_search(config, new_query, num_results, search_type, ctx)
+
+    return organic_results
+
+
+async def do_miro_search(
+    config: Config,
+    query: str,
+    num_results: int = 10,
+    search_type: str = "search",
+    ctx: Any = None,
+) -> str:
+    """搜索互联网，获取最新信息。"""
+    organic_results = await _raw_search(config, query, num_results, search_type, ctx)
 
     output = []
     output.append(f'## 搜索结果: "{query}"')

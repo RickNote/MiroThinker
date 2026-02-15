@@ -58,8 +58,9 @@ class LLMClient:
         role: str = "main",
         temperature: float = 0.7,
         max_tokens: int = 4000,
+        max_retries: int = 5,
     ) -> str:
-        retry_delays = [1, 2, 4, 8, 16]
+        retry_delays = [1, 2, 4, 8, 16][:max_retries]
         last_exception = None
 
         for attempt, delay in enumerate(retry_delays, 1):
@@ -183,15 +184,22 @@ class LLMClient:
         max_tokens: int = 4000,
     ) -> dict:
         if isinstance(messages, str):
-            messages = [{"role": "user", "content": messages}]
-
-        if messages and isinstance(messages[-1], dict) and "content" in messages[-1]:
-            orig_content = messages[-1]["content"]
-            messages[-1]["content"] = orig_content + "\n\nPlease respond in JSON format only, no other text."
+            messages_copy = [{"role": "user", "content": messages}]
         else:
-            messages.append({"role": "user", "content": "Please respond in JSON format only, no other text."})
+            messages_copy = []
+            for msg in messages:
+                if isinstance(msg, dict):
+                    messages_copy.append(msg.copy())
+                else:
+                    messages_copy.append(msg)
 
-        response_text = await self.chat(messages, role, temperature, max_tokens)
+        if messages_copy and isinstance(messages_copy[-1], dict) and "content" in messages_copy[-1]:
+            orig_content = messages_copy[-1]["content"]
+            messages_copy[-1]["content"] = orig_content + "\n\nPlease respond in JSON format only, no other text."
+        else:
+            messages_copy.append({"role": "user", "content": "Please respond in JSON format only, no other text."})
+
+        response_text = await self.chat(messages_copy, role, temperature, max_tokens)
 
         try:
             return json_repair.loads(response_text)
@@ -209,7 +217,7 @@ class LLMClient:
 
         prompt = EXTRACT_INFO_PROMPT.format(info_to_extract, content)
 
-        retry_delays = [1, 2, 4, 8]
+        retry_delays = [1, 2, 4]
 
         for attempt, delay in enumerate(retry_delays, 1):
             try:
@@ -218,6 +226,7 @@ class LLMClient:
                     role="summary",
                     temperature=1.0,
                     max_tokens=8192,
+                    max_retries=2,
                 )
                 return result
             except Exception as e:

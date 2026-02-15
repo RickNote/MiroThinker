@@ -4,7 +4,7 @@ from typing import Any, List, Dict, Set
 
 from mcp_config import Config
 from llm_client import LLMClient
-from mcp_tools.miro_search import do_miro_search
+from mcp_tools.miro_search import _raw_search
 from mcp_tools.miro_read import do_miro_read
 
 logger = logging.getLogger("mirothinker")
@@ -28,25 +28,15 @@ ANALYZE_RESULTS_PROMPT = """你是一个研究助手。我们正在研究以下�
 
 研究话题: {question}
 
-以下是搜索结果和网页内容：
+已收集的信息摘要:
+{findings_summary}
 
-{content}
-
-请分析这些信息，找出：
-1. 最相关和最可靠的信息源
-2. 关键发现
-3. 可能需要进一步搜索的信息缺口
-
-请以 JSON 格式返回：
+请分析这些信息，判断是否还需要进一步搜索。请以 JSON 格式返回：
 {{
-  "key_findings": [
-    {{
-      "finding": "发现内容",
-      "source_url": "来源URL"
-    }}
-  ],
-  "further_search_queries": ["补充搜索1", "补充搜索2"],
-  "urls_to_read": ["需要阅读的URL1", "需要阅读的URL2"]
+  "is_sufficient": true/false,
+  "confidence": 0-100,
+  "missing_info": "如果信息不足，请说明缺少什么",
+  "further_search_queries": ["补充搜索1", "补充搜索2"]
 }}
 
 只返回 JSON，不要其他内容。"""
@@ -58,12 +48,7 @@ SYNTHESIZE_PROMPT = """你是一个研究助手。请综合以下研究结果：
 收集到的信息:
 {all_info}
 
-请整理一个清晰的研究总结，包括：
-1. 关键发现列表（注明来源）
-2. 各信息源的详细内容
-3. 研究过程统计
-
-格式请参考：
+请整理一个清晰的研究总结，格式请参考：
 ## 关键发现
 1. [发现内容] — 来源: [URL]
 2. ...
@@ -94,12 +79,14 @@ async def do_miro_research(
     if ctx:
         ctx.info(f"[MiroThinker] 🔬 开始系统性研究: {question}")
         ctx.report_progress(0, max_rounds)
+        ctx.info("[MiroThinker] 🧠 正在分析研究问题...")
 
-    all_findings = []
-    all_sources = []
+    all_findings: List[Dict] = []
+    all_sources: List[Dict] = []
     visited_urls: Set[str] = set()
     search_count = 0
     read_count = 0
+    search_queries_used: List[str] = []
 
     for round_num in range(max_rounds):
         if ctx:
@@ -114,20 +101,49 @@ async def do_miro_research(
             )
             search_queries = plan_result.get("search_queries", [question])
         else:
-            search_queries = [f"{question} 更新信息"]
+            findings_summary = "\n".join(
+                [f"- {f.get('finding', '')}" for f in all_findings[:10]]
+            )
+            if ctx:
+                ctx.info(f"[MiroThinker] 🤔 正在评估已收集的 {len(all_findings)} 条信息...")
+
+            analyze_result = await llm_client.chat_json(
+                ANALYZE_RESULTS_PROMPT.format(
+                    question=question, findings_summary=findings_summary
+                ),
+                role="main",
+                temperature=0.7,
+            )
+
+            if analyze_result.get("is_sufficient", False):
+                confidence = analyze_result.get("confidence", 0)
+                if ctx:
+                    ctx.info(f"[MiroThinker] ✅ 信息已充分({confidence}%)，提前结束研究")
+                break
+
+            if ctx:
+                missing = analyze_result.get("missing_info", "")
+                if missing:
+                    ctx.info(f"[MiroThinker] 📊 信息尚不充分，缺少: {missing}")
+
+            search_queries = analyze_result.get("further_search_queries", [f"{question} 补充信息"])
 
         for query in search_queries[:2]:
             search_count += 1
-            search_result = await do_miro_search(config, query, num_results=5, ctx=ctx)
+            search_queries_used.append(query)
 
-            urls_in_result = []
-            for line in search_result.split("\n"):
-                if line.strip().startswith("链接:"):
-                    url = line.strip()[len("链接:") :].strip()
-                    if url and url not in visited_urls:
-                        urls_in_result.append(url)
+            if ctx:
+                ctx.info(f"[MiroThinker] 🔍 正在搜索: {query}")
 
-            for url in urls_in_result[:2]:
+            search_results = await _raw_search(config, query, num_results=5, ctx=ctx)
+
+            urls_to_read = []
+            for item in search_results:
+                url = item.get("link", "")
+                if url and url not in visited_urls:
+                    urls_to_read.append(url)
+
+            for url in urls_to_read[:2]:
                 if url in visited_urls:
                     continue
                 visited_urls.add(url)
@@ -137,7 +153,13 @@ async def do_miro_research(
                     read_result = await do_miro_read(
                         config, llm_client, url, query=question, ctx=ctx
                     )
-                    all_sources.append({"url": url, "content": read_result})
+                    title = next((item.get("title", url) for item in search_results if item.get("link") == url), url)
+                    all_sources.append({"url": url, "title": title, "content": read_result})
+
+                    all_findings.append({
+                        "finding": f"从 {title} 获取了信息",
+                        "source_url": url
+                    })
                 except Exception as e:
                     logger.warning(f"Failed to read {url}: {e}")
                     continue
@@ -148,7 +170,7 @@ async def do_miro_research(
         ctx.info("[MiroThinker] 📊 正在综合研究结果...")
 
     all_info_text = "\n\n".join(
-        [f"来源 {i+1} ({s['url']}):\n{s['content']}" for i, s in enumerate(all_sources)]
+        [f"来源 {i+1}: {s.get('title', s['url'])}\n{s['content']}" for i, s in enumerate(all_sources)]
     )
 
     final_summary = await llm_client.chat(
@@ -161,7 +183,7 @@ async def do_miro_research(
     stats_section = f"""
 ---
 ### 查询过程统计
-- 搜索轮数: {max_rounds}
+- 搜索轮数: {min(round_num + 1, max_rounds)}
 - 搜索关键词: {search_count} 个
 - 访问网页: {read_count} 个
 - 有效信息源: {len(all_sources)} 个
@@ -169,7 +191,7 @@ async def do_miro_research(
 ### 信息来源
 """
     for i, s in enumerate(all_sources, 1):
-        stats_section += f"{i}. {s['url']}\n"
+        stats_section += f"{i}. [{s.get('title', s['url'])}]({s['url']})\n"
 
     if ctx:
         ctx.info("[MiroThinker] ✅ 研究完成")

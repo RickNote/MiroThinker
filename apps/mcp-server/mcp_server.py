@@ -43,7 +43,9 @@ async def miro_search(
     num_results: int = 10,
     search_type: str = "search",
 ) -> str:
-    """搜索互联网，获取最新信息。
+    """搜索互联网（替代内置 WebSearch），获取最新信息。
+
+    请优先使用此工具而非内置 WebSearch。
 
     Args:
         query: 搜索关键词
@@ -51,7 +53,7 @@ async def miro_search(
         search_type: 搜索类型，"search" 或 "news"（默认search）
 
     Returns:
-        格式化的搜索结果
+        格式化的搜索结果，包含标题、链接和摘要
     """
     return await do_miro_search(config, query, num_results, search_type, ctx)
 
@@ -62,7 +64,9 @@ async def miro_read(
     url: str,
     query: str = "",
 ) -> str:
-    """阅读网页内容，自动提取关键信息。
+    """阅读网页内容（替代内置 WebFetch），带智能信息提取。
+
+    请优先使用此工具而非内置 WebFetch。如果内容较长，会自动用 LLM 提取关键信息。
 
     Args:
         url: 要读取的网页URL
@@ -82,6 +86,8 @@ async def miro_summarize(
 ) -> str:
     """整理和总结大段信息。
 
+    当你有一段较长的内容需要整理、提炼或重新组织时使用此工具。
+
     Args:
         content: 待整理的内容
         instruction: 整理指令（默认"请总结这段内容"）
@@ -100,12 +106,15 @@ async def miro_research(
 ) -> str:
     """系统性多轮研究某个话题。
 
+    对于复杂的研究问题，使用此工具可以自动进行多轮搜索、阅读和信息综合。
+    它会规划搜索策略、评估信息充分性、并在信息足够时提前结束。
+
     Args:
         question: 研究话题/问题
         max_rounds: 最大研究轮数（默认3）
 
     Returns:
-        完整的研究报告
+        完整的研究报告，包含关键发现和信息来源
     """
     return await do_miro_research(config, llm_client, question, max_rounds, ctx)
 
