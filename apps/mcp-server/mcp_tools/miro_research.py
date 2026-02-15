@@ -132,9 +132,6 @@ async def do_miro_research(
             search_count += 1
             search_queries_used.append(query)
 
-            if ctx:
-                ctx.info(f"[MiroThinker] 🔍 正在搜索: {query}")
-
             search_results = await _raw_search(config, query, num_results=5, ctx=ctx)
 
             urls_to_read = []
@@ -156,8 +153,9 @@ async def do_miro_research(
                     title = next((item.get("title", url) for item in search_results if item.get("link") == url), url)
                     all_sources.append({"url": url, "title": title, "content": read_result})
 
+                    content_preview = read_result[:300].replace("\n", " ")
                     all_findings.append({
-                        "finding": f"从 {title} 获取了信息",
+                        "finding": content_preview,
                         "source_url": url
                     })
                 except Exception as e:
@@ -194,6 +192,7 @@ async def do_miro_research(
         stats_section += f"{i}. [{s.get('title', s['url'])}]({s['url']})\n"
 
     if ctx:
+        ctx.report_progress(max_rounds, max_rounds)
         ctx.info("[MiroThinker] ✅ 研究完成")
 
     return f"## 调查结果: {question}\n\n{final_summary}\n{stats_section}"
