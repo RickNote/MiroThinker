@@ -153,6 +153,8 @@ async def handle_sse(request):
         await server.run(
             read_stream, write_stream, server.create_initialization_options()
         )
+    from starlette.responses import Response
+    return Response()
 
 
 async def health(request):
