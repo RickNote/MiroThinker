@@ -86,7 +86,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "question": {"type": "string", "description": "研究话题/问题"},
-                "max_rounds": {"type": "integer", "description": "最大研究轮数", "default": 3},
+                "max_rounds": {"type": "integer", "description": "最大研究轮数", "default": 5},
             },
             "required": ["question"],
         },
